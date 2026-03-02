@@ -21,7 +21,7 @@ import torch.distributed as dist
 from runtimectl import RuntimeController
 
 rt = RuntimeController(ddp=True)
-rt.set_queue_dir("/tmp/runtimectl")
+rt.configure("/tmp/runtimectl")
 ```
 
 Then import `rt` where needed.
@@ -51,7 +51,8 @@ from runtime_control import rt
 rt.poll_and_apply(ctx={"optimizer": optimizer, "model": model}, every_s=2.0)
 ```
 
-`set_queue_dir(...)` can be called after `register(...)`, but must be called before the first `poll_and_apply(...)`.
+`configure(...)` can be called after `register(...)`, but must be called before the first `poll_and_apply(...)`.
+`register(...)` is idempotent by default; use `overwrite=True` to replace an existing control.
 
 ## DDP behavior
 
