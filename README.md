@@ -2,59 +2,81 @@
 
 Minimal runtime control plane for training loops.
 
-## Goals
+## Design
 
-- Keep training code changes minimal.
-- Initialize once with queue location.
-- Register controls with path + apply/validate functions.
-- Poll control queue periodically.
-- DDP-safe pattern: rank 0 polls queue, broadcasts instructions, all ranks apply.
+`runtimectl` is explicit by default:
+- you create a `RuntimeController` instance in your code
+- register controls on that instance
+- call `poll_and_apply` on that instance
 
-## Python API
+No global singleton convenience wrappers.
+
+## Recommended integration pattern
+
+Create a dedicated owner module in your training project, e.g. `runtime_control.py`.
 
 ```python
-from runtimectl import init_control, register_control, poll_and_apply
+# runtime_control.py
+import torch.distributed as dist
+from runtimectl import RuntimeController
 
-# initialize once (single source of truth for queue_dir)
-init_control(queue_dir="/tmp/runtimectl", ddp=False)
-
-register_control(
-    "optimizer.lr.multiplier",
-    apply_fn=lambda v, ctx: [pg.__setitem__("lr", pg["lr"] * float(v)) for pg in ctx["optimizer"].param_groups],
-    validate_fn=lambda v: float(v),
+rt = RuntimeController(
+    queue_dir="/tmp/runtimectl",
+    ddp=True,
+    dist_module=dist,
 )
-
-# inside training loop
-poll_and_apply(ctx={"optimizer": optimizer}, every_s=2.0)
 ```
 
-If `register_control(...)` or `poll_and_apply(...)` is called before `init_control(...)`, a clear error is raised.
+Then import `rt` where needed.
+
+```python
+# controls.py
+from runtime_control import rt
+
+def validate_mult(v):
+    v = float(v)
+    if v <= 0:
+        raise ValueError("multiplier must be > 0")
+    return v
+
+def apply_lr_multiplier(mult, ctx):
+    for pg in ctx["optimizer"].param_groups:
+        pg["lr"] *= mult
+
+rt.register_control("optimizer.lr.multiplier", apply_lr_multiplier, validate_mult)
+```
+
+```python
+# train_loop.py
+from runtime_control import rt
+
+# inside training loop
+rt.poll_and_apply(ctx={"optimizer": optimizer, "model": model}, every_s=2.0)
+```
 
 ## DDP behavior
 
-- If initialized with `ddp=True` and `dist_module=torch.distributed`:
-  - rank 0 reads and drains queue
-  - barrier
-  - broadcast instructions to all ranks
-  - barrier
-  - all ranks apply same instructions in order
+If initialized with `ddp=True` and `dist_module=torch.distributed`:
+- rank 0 reads and drains queue
+- barrier
+- broadcast instructions to all ranks
+- barrier
+- all ranks apply same instructions in order
 
 ## CLI
-
-`runtimectl` uses the same queue dir configured by `init_control(...)` (stored in `~/.runtimectl/current_queue_dir`).
 
 Enqueue command:
 
 ```bash
-runtimectl optimizer.lr.multiplier 0.5
-runtimectl model.dropout.p 0.2
+runtimectl -q /tmp/runtimectl optimizer.lr.multiplier 0.5
+runtimectl -q /tmp/runtimectl model.dropout.p 0.2
 ```
 
 Status:
 
 ```bash
-runtimectl status
-runtimectl status --last 20
+runtimectl -q /tmp/runtimectl status
+runtimectl -q /tmp/runtimectl status --last 20
 ```
 
 ## DDP example
@@ -70,9 +92,9 @@ torchrun --nproc_per_node=2 examples/ddp_train.py
 Then from another shell:
 
 ```bash
-runtimectl optimizer.lr.multiplier 0.5
-runtimectl model.dropout.p 0.2
-runtimectl status
+runtimectl -q /tmp/runtimectl-ddp optimizer.lr.multiplier 0.5
+runtimectl -q /tmp/runtimectl-ddp model.dropout.p 0.2
+runtimectl -q /tmp/runtimectl-ddp status
 ```
 
 ## Queue format

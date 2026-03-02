@@ -5,7 +5,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .api import get_current_queue_dir
 from .controller import RuntimeController
 
 
@@ -16,16 +15,15 @@ def _parse_value(raw: str) -> Any:
         return raw
 
 
-def cmd_enqueue(path: str, value_raw: str) -> int:
-    queue_dir = get_current_queue_dir()
+def cmd_enqueue(queue_dir: str, path: str, value_raw: str) -> int:
     value = _parse_value(value_raw)
     cmd = RuntimeController.enqueue(queue_dir, path, value, op="set")
     print(json.dumps(cmd, ensure_ascii=False))
     return 0
 
 
-def cmd_status(last: int) -> int:
-    q = Path(get_current_queue_dir())
+def cmd_status(queue_dir: str, last: int) -> int:
+    q = Path(queue_dir)
     commands = q / "commands.jsonl"
     acks = q / "acks.jsonl"
 
@@ -47,6 +45,7 @@ def cmd_status(last: int) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="runtimectl", description="Runtime queue control CLI")
+    p.add_argument("-q", "--queue-dir", required=True, help="Queue directory")
     p.add_argument("path", nargs="?", help="Registered control path, or 'status'")
     p.add_argument("value", nargs="?", help="Value (JSON or raw string)")
     p.add_argument("--last", type=int, default=10, help="For status: how many ack lines to show")
@@ -58,13 +57,13 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.path == "status" and args.value is None:
-        return cmd_status(args.last)
+        return cmd_status(args.queue_dir, args.last)
 
     if args.path is None or args.value is None:
         parser.print_help()
         return 2
 
-    return cmd_enqueue(args.path, args.value)
+    return cmd_enqueue(args.queue_dir, args.path, args.value)
 
 
 if __name__ == "__main__":
