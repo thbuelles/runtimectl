@@ -1,27 +1,25 @@
-from __future__ import annotations
-
 import json
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable
 
 
 @dataclass
 class _Control:
     apply_fn: Callable[[Any, Any], None]
-    validate_fn: Optional[Callable[[Any], Any]] = None
+    validate_fn: Callable[[Any], Any] | None = None
 
 
 class RuntimeController:
-    def __init__(self, queue_dir: Optional[str] = None, *, ddp: bool = False):
-        self.queue_dir: Optional[Path] = None
-        self.commands_path: Optional[Path] = None
-        self.acks_path: Optional[Path] = None
+    def __init__(self, queue_dir: str | None = None, *, ddp: bool = False):
+        self.queue_dir: Path | None = None
+        self.commands_path: Path | None = None
+        self.acks_path: Path | None = None
         self.configured = False
 
-        self._controls: Dict[str, _Control] = {}
+        self._controls: dict[str, _Control] = {}
         self._last_poll_ts = 0.0
         self._read_offset = 0
 
@@ -51,7 +49,7 @@ class RuntimeController:
         self,
         path: str,
         apply_fn: Callable[[Any, Any], None],
-        validate_fn: Optional[Callable[[Any], Any]] = None,
+        validate_fn: Callable[[Any], Any] | None = None,
         *,
         overwrite: bool = False,
     ) -> None:
@@ -61,7 +59,7 @@ class RuntimeController:
             return
         self._controls[path] = _Control(apply_fn=apply_fn, validate_fn=validate_fn)
 
-    def poll_and_apply(self, ctx: Any = None, every_s: float = 2.0) -> List[dict]:
+    def poll_and_apply(self, ctx: Any = None, every_s: float = 2.0) -> list[dict]:
         self._ensure_queue_ready()
 
         now = time.time()
@@ -97,7 +95,7 @@ class RuntimeController:
         except Exception:
             return False
 
-    def _ddp_collect_and_broadcast(self) -> List[dict]:
+    def _ddp_collect_and_broadcast(self) -> list[dict]:
         import torch.distributed as dist  # type: ignore
 
         rank = dist.get_rank()
@@ -105,9 +103,12 @@ class RuntimeController:
         dist.broadcast_object_list(payload, src=0)
         return payload[0] or []
 
-    def _read_new_commands_local(self) -> List[dict]:
+    def _read_new_commands_local(self) -> list[dict]:
         self._ensure_queue_ready()
         assert self.commands_path is not None
+        size = self.commands_path.stat().st_size
+        if self._read_offset > size:
+            self._read_offset = 0
 
         with self.commands_path.open("r", encoding="utf-8") as f:
             f.seek(self._read_offset)
