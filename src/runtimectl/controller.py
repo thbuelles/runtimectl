@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass
@@ -24,14 +23,11 @@ class RuntimeController:
 
         self._controls: Dict[str, _Control] = {}
         self._last_poll_ts = 0.0
+        self._read_offset = 0
 
         self.ddp = ddp
         self.dist = dist_module
 
-        # Track line offset for non-DDP local polling
-        self._read_offset = 0
-
-        # Ensure files exist
         self.commands_path.touch(exist_ok=True)
         self.acks_path.touch(exist_ok=True)
 
@@ -79,8 +75,7 @@ class RuntimeController:
         self.dist.barrier()
         self.dist.broadcast_object_list(payload, src=0)
         self.dist.barrier()
-        instructions = payload[0] or []
-        return instructions
+        return payload[0] or []
 
     def _read_new_commands_local(self) -> List[dict]:
         lines = self.commands_path.read_text(encoding="utf-8").splitlines()
@@ -115,12 +110,7 @@ class RuntimeController:
         path = cmd.get("path")
         value = cmd.get("value")
 
-        base = {
-            "id": cmd_id,
-            "ts": time.time(),
-            "path": path,
-            "op": op,
-        }
+        base = {"id": cmd_id, "ts": time.time(), "path": path, "op": op}
 
         if op != "set":
             return {**base, "status": "rejected", "error": f"unsupported op: {op}"}
