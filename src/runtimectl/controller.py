@@ -31,7 +31,7 @@ class RuntimeController:
         self.commands_path.touch(exist_ok=True)
         self.acks_path.touch(exist_ok=True)
 
-    def register_control(
+    def register(
         self,
         path: str,
         apply_fn: Callable[[Any, Any], None],

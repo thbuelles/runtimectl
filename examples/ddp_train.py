@@ -72,8 +72,8 @@ def main() -> None:
             if isinstance(m, torch.nn.Dropout):
                 m.p = p
 
-    rt.register_control("optimizer.lr.multiplier", apply_lr_multiplier, validate_mult)
-    rt.register_control("model.dropout.p", apply_dropout, validate_dropout)
+    rt.register("optimizer.lr.multiplier", apply_lr_multiplier, validate_mult)
+    rt.register("model.dropout.p", apply_dropout, validate_dropout)
 
     if rank == 0:
         print(f"[rank0] world_size={world_size}")

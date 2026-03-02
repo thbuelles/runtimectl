@@ -43,7 +43,7 @@ def apply_lr_multiplier(mult, ctx):
     for pg in ctx["optimizer"].param_groups:
         pg["lr"] *= mult
 
-rt.register_control("optimizer.lr.multiplier", apply_lr_multiplier, validate_mult)
+rt.register("optimizer.lr.multiplier", apply_lr_multiplier, validate_mult)
 ```
 
 ```python
