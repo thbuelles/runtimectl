@@ -19,6 +19,7 @@ class RuntimeController:
         self.queue_dir: Optional[Path] = None
         self.commands_path: Optional[Path] = None
         self.acks_path: Optional[Path] = None
+        self.configured = False
 
         self._controls: Dict[str, _Control] = {}
         self._last_poll_ts = 0.0
@@ -27,9 +28,15 @@ class RuntimeController:
         self.ddp = ddp
 
         if queue_dir is not None:
-            self.set_queue_dir(queue_dir)
+            self.configure(queue_dir)
 
-    def set_queue_dir(self, queue_dir: str) -> None:
+    def configure(self, queue_dir: str) -> None:
+        if self.configured:
+            if self.queue_dir == Path(queue_dir):
+                return
+            raise ValueError(
+                f"RuntimeController already configured with {self.queue_dir}"
+            )
         q = Path(queue_dir)
         q.mkdir(parents=True, exist_ok=True)
         self.queue_dir = q
@@ -37,17 +44,21 @@ class RuntimeController:
         self.acks_path = q / "acks.jsonl"
         self.commands_path.touch(exist_ok=True)
         self.acks_path.touch(exist_ok=True)
+        self.configured = True
+
 
     def register(
         self,
         path: str,
         apply_fn: Callable[[Any, Any], None],
         validate_fn: Optional[Callable[[Any], Any]] = None,
+        *,
+        overwrite: bool = False,
     ) -> None:
         if not path or not isinstance(path, str):
             raise ValueError("path must be a non-empty string")
-        if path in self._controls:
-            raise ValueError(f"control already registered: {path}")
+        if path in self._controls and not overwrite:
+            return
         self._controls[path] = _Control(apply_fn=apply_fn, validate_fn=validate_fn)
 
     def poll_and_apply(self, ctx: Any = None, every_s: float = 2.0) -> List[dict]:
@@ -71,9 +82,9 @@ class RuntimeController:
         return applied
 
     def _ensure_queue_ready(self) -> None:
-        if self.commands_path is None or self.acks_path is None:
+        if not self.configured or self.commands_path is None or self.acks_path is None:
             raise RuntimeError(
-                "queue_dir is not set. Set it in RuntimeController(...) or call set_queue_dir(...) before poll_and_apply()."
+                "queue_dir is not set. Call configure(...) before poll_and_apply()."
             )
 
     def _is_ddp_active(self) -> bool:
@@ -91,21 +102,22 @@ class RuntimeController:
 
         rank = dist.get_rank()
         payload = [self._read_new_commands_local()] if rank == 0 else [None]
-        dist.barrier()
         dist.broadcast_object_list(payload, src=0)
-        dist.barrier()
         return payload[0] or []
 
     def _read_new_commands_local(self) -> List[dict]:
         self._ensure_queue_ready()
         assert self.commands_path is not None
 
-        lines = self.commands_path.read_text(encoding="utf-8").splitlines()
-        if self._read_offset >= len(lines):
+        with self.commands_path.open("r", encoding="utf-8") as f:
+            f.seek(self._read_offset)
+            data = f.read()
+            self._read_offset = f.tell()
+
+        if not data:
             return []
 
-        new_lines = lines[self._read_offset :]
-        self._read_offset = len(lines)
+        new_lines = data.splitlines()
         out = []
         for ln in new_lines:
             ln = ln.strip()
