@@ -49,7 +49,7 @@ def main() -> None:
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
-    rt = RuntimeController(queue_dir="/tmp/runtimectl-ddp", ddp=True, dist_module=dist)
+    rt = RuntimeController(queue_dir="/tmp/runtimectl-ddp", ddp=True)
 
     def validate_mult(v):
         v = float(v)

@@ -20,11 +20,8 @@ Create a dedicated owner module in your training project, e.g. `runtime_control.
 import torch.distributed as dist
 from runtimectl import RuntimeController
 
-rt = RuntimeController(
-    queue_dir="/tmp/runtimectl",
-    ddp=True,
-    dist_module=dist,
-)
+rt = RuntimeController(ddp=True)
+rt.set_queue_dir("/tmp/runtimectl")
 ```
 
 Then import `rt` where needed.
@@ -54,9 +51,11 @@ from runtime_control import rt
 rt.poll_and_apply(ctx={"optimizer": optimizer, "model": model}, every_s=2.0)
 ```
 
+`set_queue_dir(...)` can be called after `register(...)`, but must be called before the first `poll_and_apply(...)`.
+
 ## DDP behavior
 
-If initialized with `ddp=True` and `dist_module=torch.distributed`:
+If initialized with `ddp=True` and `torch.distributed` is initialized:
 - rank 0 reads and drains queue
 - barrier
 - broadcast instructions to all ranks
