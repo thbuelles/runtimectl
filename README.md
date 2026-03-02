@@ -57,6 +57,24 @@ runtimectl status
 runtimectl status --last 20
 ```
 
+## DDP example
+
+See `examples/ddp_train.py` for a full minimal torch.distributed example.
+
+Run:
+
+```bash
+torchrun --nproc_per_node=2 examples/ddp_train.py
+```
+
+Then from another shell:
+
+```bash
+runtimectl optimizer.lr.multiplier 0.5
+runtimectl model.dropout.p 0.2
+runtimectl status
+```
+
 ## Queue format
 
 `runtimectl` writes one JSON command per line into `commands.jsonl`.
