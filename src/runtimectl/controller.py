@@ -3,10 +3,28 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Generic, TypeVar
+from typing import Any, Callable, Generic, TypeVar, TypedDict
 
 
 CtxT = TypeVar("CtxT")
+
+
+class Command(TypedDict):
+    id: str
+    ts: float
+    op: str
+    path: str
+    value: Any
+
+
+class Ack(TypedDict, total=False):
+    id: str
+    ts: float
+    op: str
+    path: str
+    status: str
+    value: Any
+    error: str
 
 
 @dataclass
@@ -62,7 +80,9 @@ class RuntimeController(Generic[CtxT]):
             return
         self._controls[path] = _Control(apply_fn=apply_fn, validate_fn=validate_fn)
 
-    def poll_and_apply(self, ctx: CtxT | None = None, every_s: float = 2.0) -> list[dict]:
+    def poll_and_apply(
+        self, ctx: CtxT | None = None, every_s: float = 2.0
+    ) -> list[Ack]:
         self._ensure_queue_ready()
 
         now = time.time()
@@ -98,7 +118,7 @@ class RuntimeController(Generic[CtxT]):
         except Exception:
             return False
 
-    def _ddp_collect_and_broadcast(self) -> list[dict]:
+    def _ddp_collect_and_broadcast(self) -> list[Command]:
         import torch.distributed as dist  # type: ignore
 
         rank = dist.get_rank()
@@ -106,7 +126,7 @@ class RuntimeController(Generic[CtxT]):
         dist.broadcast_object_list(payload, src=0)
         return payload[0] or []
 
-    def _read_new_commands_local(self) -> list[dict]:
+    def _read_new_commands_local(self) -> list[Command]:
         self._ensure_queue_ready()
         assert self.commands_path is not None
         size = self.commands_path.stat().st_size
@@ -142,13 +162,13 @@ class RuntimeController(Generic[CtxT]):
                 )
         return out
 
-    def _apply_command(self, cmd: dict, ctx: CtxT | None) -> dict:
+    def _apply_command(self, cmd: Command, ctx: CtxT | None) -> Ack:
         cmd_id = cmd.get("id") or str(uuid.uuid4())
         op = cmd.get("op", "set")
         path = cmd.get("path")
         value = cmd.get("value")
 
-        base = {"id": cmd_id, "ts": time.time(), "path": path, "op": op}
+        base: Ack = {"id": cmd_id, "ts": time.time(), "path": path, "op": op}
 
         if op != "set":
             return {**base, "status": "rejected", "error": f"unsupported op: {op}"}
@@ -165,17 +185,17 @@ class RuntimeController(Generic[CtxT]):
         except Exception as e:
             return {**base, "status": "failed", "error": str(e)}
 
-    def _append_ack(self, ack: dict) -> None:
+    def _append_ack(self, ack: Ack) -> None:
         self._ensure_queue_ready()
         assert self.acks_path is not None
         with self.acks_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(ack, ensure_ascii=False) + "\n")
 
     @staticmethod
-    def enqueue(queue_dir: str, path: str, value: Any, op: str = "set") -> dict:
+    def enqueue(queue_dir: str, path: str, value: Any, op: str = "set") -> Command:
         qdir = Path(queue_dir)
         qdir.mkdir(parents=True, exist_ok=True)
-        cmd = {
+        cmd: Command = {
             "id": str(uuid.uuid4()),
             "ts": time.time(),
             "op": op,
