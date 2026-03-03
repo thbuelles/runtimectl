@@ -15,11 +15,19 @@ def _parse_value(raw: str) -> Any:
         return raw
 
 
-def cmd_enqueue(queue_dir: str, path: str, args_raw: list[str], kwargs_raw: str | None) -> int:
+def cmd_enqueue(
+    queue_dir: str,
+    path: str,
+    args_raw: list[str],
+    kwargs_raw: str | None,
+    parser: argparse.ArgumentParser,
+) -> int:
     args = [_parse_value(v) for v in args_raw]
     kwargs = _parse_value(kwargs_raw) if kwargs_raw is not None else {}
     if kwargs is None:
         kwargs = {}
+    if not isinstance(kwargs, dict):
+        parser.error("--kwargs must be a JSON object (e.g. --kwargs '{\"label\":\"manual\"}')")
     cmd = RuntimeController.enqueue(queue_dir, path, args=args, kwargs=kwargs, op="set")
     print(json.dumps(cmd, ensure_ascii=False))
     return 0
@@ -67,7 +75,7 @@ def main() -> int:
         parser.print_help()
         return 2
 
-    return cmd_enqueue(args.queue_dir, args.path, args.args, args.kwargs)
+    return cmd_enqueue(args.queue_dir, args.path, args.args, args.kwargs, parser)
 
 
 if __name__ == "__main__":

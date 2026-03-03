@@ -173,6 +173,11 @@ class RuntimeController(Generic[CtxT]):
 
         base: Ack = {"id": cmd_id, "ts": time.time(), "path": path, "op": op}
 
+        if not isinstance(args, list):
+            return {**base, "status": "rejected", "error": "command args must be a list"}
+        if not isinstance(kwargs, dict):
+            return {**base, "status": "rejected", "error": "command kwargs must be an object"}
+
         if op != "set":
             return {**base, "status": "rejected", "error": f"unsupported op: {op}"}
 
@@ -202,6 +207,11 @@ class RuntimeController(Generic[CtxT]):
         kwargs: dict[str, Any] | None = None,
         op: str = "set",
     ) -> Command:
+        if args is not None and not isinstance(args, list):
+            raise TypeError("args must be a list")
+        if kwargs is not None and not isinstance(kwargs, dict):
+            raise TypeError("kwargs must be a dict")
+
         qdir = Path(queue_dir)
         qdir.mkdir(parents=True, exist_ok=True)
         cmd: Command = {
