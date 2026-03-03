@@ -1,3 +1,4 @@
+import inspect
 import json
 import time
 import uuid
@@ -29,7 +30,7 @@ class Ack(TypedDict, total=False):
 
 @dataclass
 class _Control:
-    apply_fn: Callable[[Any, CtxT], None]
+    apply_fn: Callable[..., None]
     validate_fn: Callable[[Any], Any] | None = None
 
 
@@ -69,7 +70,7 @@ class RuntimeController(Generic[CtxT]):
     def register(
         self,
         path: str,
-        apply_fn: Callable[[Any, CtxT], None],
+        apply_fn: Callable[..., None],
         validate_fn: Callable[[Any], Any] | None = None,
         *,
         overwrite: bool = False,
@@ -180,7 +181,7 @@ class RuntimeController(Generic[CtxT]):
         try:
             if control.validate_fn is not None:
                 value = control.validate_fn(value)
-            control.apply_fn(value, ctx)
+            _call_apply(control.apply_fn, value, ctx)
             return {**base, "status": "applied", "value": value}
         except Exception as e:
             return {**base, "status": "failed", "error": str(e)}
@@ -206,3 +207,21 @@ class RuntimeController(Generic[CtxT]):
         with commands_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(cmd, ensure_ascii=False) + "\n")
         return cmd
+
+
+def _call_apply(fn: Callable[..., None], value: Any, ctx: CtxT | None) -> None:
+    sig = inspect.signature(fn)
+    params = list(sig.parameters.values())
+    if any(
+        p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        for p in params
+    ):
+        fn(value, ctx)
+        return
+    if len(params) == 1:
+        fn(ctx)
+        return
+    if len(params) == 2:
+        fn(value, ctx)
+        return
+    raise TypeError("apply_fn must accept (ctx) or (value, ctx)")
