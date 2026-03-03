@@ -181,7 +181,7 @@ class RuntimeController(Generic[CtxT]):
         try:
             if control.validate_fn is not None:
                 value = control.validate_fn(value)
-            _call_apply(control.apply_fn, value, ctx)
+            _call_apply(control.apply_fn, ctx, value)
             return {**base, "status": "applied", "value": value}
         except Exception as e:
             return {**base, "status": "failed", "error": str(e)}
@@ -209,19 +209,28 @@ class RuntimeController(Generic[CtxT]):
         return cmd
 
 
-def _call_apply(fn: Callable[..., None], value: Any, ctx: CtxT | None) -> None:
+def _call_apply(fn: Callable[..., None], ctx: CtxT | None, value: Any) -> None:
     sig = inspect.signature(fn)
     params = list(sig.parameters.values())
+    if not params:
+        raise TypeError("apply_fn must accept ctx as its first argument")
     if any(
         p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
         for p in params
     ):
-        fn(value, ctx)
+        if isinstance(value, dict) and ("args" in value or "kwargs" in value):
+            args = value.get("args", [])
+            kwargs = value.get("kwargs", {})
+            fn(ctx, *args, **kwargs)
+        elif value is None:
+            fn(ctx)
+        else:
+            fn(ctx, value)
         return
     if len(params) == 1:
         fn(ctx)
         return
     if len(params) == 2:
-        fn(value, ctx)
+        fn(ctx, value)
         return
-    raise TypeError("apply_fn must accept (ctx) or (value, ctx)")
+    raise TypeError("apply_fn must accept (ctx) or (ctx, value)")
