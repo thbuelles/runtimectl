@@ -36,7 +36,7 @@ def validate_mult(v):
         raise ValueError("multiplier must be > 0")
     return v
 
-def apply_lr_multiplier(mult, ctx):
+def apply_lr_multiplier(ctx, mult):
     for pg in ctx["optimizer"].param_groups:
         pg["lr"] *= mult
 
@@ -53,6 +53,7 @@ rt.poll_and_apply(ctx={"optimizer": optimizer, "model": model}, every_s=2.0)
 
 `configure(...)` can be called after `register(...)`, but must be called before the first `poll_and_apply(...)`.
 `register(...)` is idempotent by default; use `overwrite=True` to replace an existing control.
+Controls always receive `ctx` first, then any positional/keyword arguments from the command.
 
 ## DDP behavior
 
@@ -70,6 +71,8 @@ Enqueue command:
 ```bash
 runtimectl -q /tmp/runtimectl optimizer.lr.multiplier 0.5
 runtimectl -q /tmp/runtimectl model.dropout.p 0.2
+runtimectl -q /tmp/runtimectl save_ckpt
+runtimectl -q /tmp/runtimectl save_ckpt --kwargs '{"label":"manual"}'
 ```
 
 Status:
@@ -104,7 +107,7 @@ runtimectl -q /tmp/runtimectl-ddp status
 Example command:
 
 ```json
-{"id":"...","ts":1700000000.0,"op":"set","path":"optimizer.lr.multiplier","value":0.5}
+{"id":"...","ts":1700000000.0,"op":"set","path":"optimizer.lr.multiplier","args":[0.5],"kwargs":{}}
 ```
 
 Acks are appended to `acks.jsonl`.

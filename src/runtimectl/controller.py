@@ -1,4 +1,3 @@
-import inspect
 import json
 import time
 import uuid
@@ -15,7 +14,8 @@ class Command(TypedDict):
     ts: float
     op: str
     path: str
-    value: Any
+    args: list[Any]
+    kwargs: dict[str, Any]
 
 
 class Ack(TypedDict, total=False):
@@ -24,14 +24,15 @@ class Ack(TypedDict, total=False):
     op: str
     path: str
     status: str
-    value: Any
+    args: list[Any]
+    kwargs: dict[str, Any]
     error: str
 
 
 @dataclass
 class _Control:
     apply_fn: Callable[..., None]
-    validate_fn: Callable[[Any], Any] | None = None
+    validate_fn: Callable[[list[Any], dict[str, Any]], tuple[list[Any], dict[str, Any]]] | None = None
 
 
 class RuntimeController(Generic[CtxT]):
@@ -71,7 +72,7 @@ class RuntimeController(Generic[CtxT]):
         self,
         path: str,
         apply_fn: Callable[..., None],
-        validate_fn: Callable[[Any], Any] | None = None,
+        validate_fn: Callable[[list[Any], dict[str, Any]], tuple[list[Any], dict[str, Any]]] | None = None,
         *,
         overwrite: bool = False,
     ) -> None:
@@ -167,7 +168,8 @@ class RuntimeController(Generic[CtxT]):
         cmd_id = cmd.get("id") or str(uuid.uuid4())
         op = cmd.get("op", "set")
         path = cmd.get("path")
-        value = cmd.get("value")
+        args = cmd.get("args", [])
+        kwargs = cmd.get("kwargs", {})
 
         base: Ack = {"id": cmd_id, "ts": time.time(), "path": path, "op": op}
 
@@ -180,9 +182,9 @@ class RuntimeController(Generic[CtxT]):
 
         try:
             if control.validate_fn is not None:
-                value = control.validate_fn(value)
-            _call_apply(control.apply_fn, ctx, value)
-            return {**base, "status": "applied", "value": value}
+                args, kwargs = control.validate_fn(args, kwargs)
+            control.apply_fn(ctx, *args, **kwargs)
+            return {**base, "status": "applied", "args": args, "kwargs": kwargs}
         except Exception as e:
             return {**base, "status": "failed", "error": str(e)}
 
@@ -193,7 +195,13 @@ class RuntimeController(Generic[CtxT]):
             f.write(json.dumps(ack, ensure_ascii=False) + "\n")
 
     @staticmethod
-    def enqueue(queue_dir: str, path: str, value: Any, op: str = "set") -> Command:
+    def enqueue(
+        queue_dir: str,
+        path: str,
+        args: list[Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
+        op: str = "set",
+    ) -> Command:
         qdir = Path(queue_dir)
         qdir.mkdir(parents=True, exist_ok=True)
         cmd: Command = {
@@ -201,36 +209,10 @@ class RuntimeController(Generic[CtxT]):
             "ts": time.time(),
             "op": op,
             "path": path,
-            "value": value,
+            "args": args or [],
+            "kwargs": kwargs or {},
         }
         commands_path = qdir / "commands.jsonl"
         with commands_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(cmd, ensure_ascii=False) + "\n")
         return cmd
-
-
-def _call_apply(fn: Callable[..., None], ctx: CtxT | None, value: Any) -> None:
-    sig = inspect.signature(fn)
-    params = list(sig.parameters.values())
-    if not params:
-        raise TypeError("apply_fn must accept ctx as its first argument")
-    if any(
-        p.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-        for p in params
-    ):
-        if isinstance(value, dict) and ("args" in value or "kwargs" in value):
-            args = value.get("args", [])
-            kwargs = value.get("kwargs", {})
-            fn(ctx, *args, **kwargs)
-        elif value is None:
-            fn(ctx)
-        else:
-            fn(ctx, value)
-        return
-    if len(params) == 1:
-        fn(ctx)
-        return
-    if len(params) == 2:
-        fn(ctx, value)
-        return
-    raise TypeError("apply_fn must accept (ctx) or (ctx, value)")
