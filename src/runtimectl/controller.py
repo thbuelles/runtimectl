@@ -3,16 +3,19 @@ import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Generic, TypeVar
+
+
+CtxT = TypeVar("CtxT")
 
 
 @dataclass
 class _Control:
-    apply_fn: Callable[[Any, Any], None]
+    apply_fn: Callable[[Any, CtxT], None]
     validate_fn: Callable[[Any], Any] | None = None
 
 
-class RuntimeController:
+class RuntimeController(Generic[CtxT]):
     def __init__(self, queue_dir: str | None = None, *, ddp: bool = False):
         self.queue_dir: Path | None = None
         self.commands_path: Path | None = None
@@ -48,7 +51,7 @@ class RuntimeController:
     def register(
         self,
         path: str,
-        apply_fn: Callable[[Any, Any], None],
+        apply_fn: Callable[[Any, CtxT], None],
         validate_fn: Callable[[Any], Any] | None = None,
         *,
         overwrite: bool = False,
@@ -59,7 +62,7 @@ class RuntimeController:
             return
         self._controls[path] = _Control(apply_fn=apply_fn, validate_fn=validate_fn)
 
-    def poll_and_apply(self, ctx: Any = None, every_s: float = 2.0) -> list[dict]:
+    def poll_and_apply(self, ctx: CtxT | None = None, every_s: float = 2.0) -> list[dict]:
         self._ensure_queue_ready()
 
         now = time.time()
@@ -139,7 +142,7 @@ class RuntimeController:
                 )
         return out
 
-    def _apply_command(self, cmd: dict, ctx: Any) -> dict:
+    def _apply_command(self, cmd: dict, ctx: CtxT | None) -> dict:
         cmd_id = cmd.get("id") or str(uuid.uuid4())
         op = cmd.get("op", "set")
         path = cmd.get("path")
