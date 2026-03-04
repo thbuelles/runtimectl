@@ -87,14 +87,15 @@ class RuntimeController(Generic[CtxT]):
     ) -> list[Ack]:
         self._ensure_queue_ready()
 
-        now = time.time()
-        if every_s > 0 and (now - self._last_poll_ts) < every_s:
-            return []
-        self._last_poll_ts = now
-
         if self._is_ddp_active():
-            instructions = self._ddp_collect_and_broadcast()
+            # In DDP, every rank must enter the same collective each call.
+            # Throttling is handled on rank 0 and the result is broadcast.
+            instructions = self._ddp_collect_and_broadcast(every_s=every_s)
         else:
+            now = time.time()
+            if every_s > 0 and (now - self._last_poll_ts) < every_s:
+                return []
+            self._last_poll_ts = now
             instructions = self._read_new_commands_local()
 
         applied = []
@@ -120,11 +121,18 @@ class RuntimeController(Generic[CtxT]):
         except Exception:
             return False
 
-    def _ddp_collect_and_broadcast(self) -> list[Command]:
+    def _ddp_collect_and_broadcast(self, every_s: float) -> list[Command]:
         import torch.distributed as dist  # type: ignore
 
         rank = dist.get_rank()
-        payload = [self._read_new_commands_local()] if rank == 0 else [None]
+        payload: list[list[Command] | None] = [None]
+        if rank == 0:
+            now = time.time()
+            if every_s > 0 and (now - self._last_poll_ts) < every_s:
+                payload[0] = []
+            else:
+                self._last_poll_ts = now
+                payload[0] = self._read_new_commands_local()
         dist.broadcast_object_list(payload, src=0)
         return payload[0] or []
 
