@@ -102,7 +102,8 @@ class RuntimeController(Generic[CtxT]):
         for cmd in instructions:
             result = self._apply_command(cmd, ctx)
             applied.append(result)
-            self._append_ack(result)
+            if self._should_append_ack():
+                self._append_ack(result)
         return applied
 
     def _ensure_queue_ready(self) -> None:
@@ -135,6 +136,16 @@ class RuntimeController(Generic[CtxT]):
                 payload[0] = self._read_new_commands_local()
         dist.broadcast_object_list(payload, src=0)
         return payload[0] or []
+
+    def _should_append_ack(self) -> bool:
+        if not self._is_ddp_active():
+            return True
+        try:
+            import torch.distributed as dist  # type: ignore
+
+            return dist.get_rank() == 0
+        except Exception:
+            return True
 
     def _read_new_commands_local(self) -> list[Command]:
         self._ensure_queue_ready()
